@@ -3,18 +3,23 @@ import pandas as pd
 import random
 
 # Load data with caching
-@st.cache_data
+@st.cache_data(ttl=3600, max_entries=3)  # Cache for 1 hour, limit entries
 def load_data():
-    anime_final = pd.read_csv("s3://animeoracle/final_df.csv")
-    tfidf = pd.read_csv("s3://animeoracle/tfidf_similarity_df.csv")
-    tags = pd.read_csv("s3://animeoracle/tag_similarities_df.csv")
-    genre_list = pd.read_csv("genre_list.csv")
-    studio_list = pd.read_csv("studio_list.csv")
-    title_list = pd.read_csv("title_list.csv")
-    status_list = pd.read_csv("status_list.csv")
-    episodes_list = pd.read_csv("episodes_list.csv")
-    started_list = pd.read_csv("started_list.csv")
-    return anime_final, tfidf, tags, genre_list, studio_list, title_list, status_list,episodes_list, started_list
+    try:
+        st.info("Loading data... Please wait.")
+        anime_final = pd.read_csv("s3://animeoracle/final_df.csv")
+        tfidf = pd.read_csv("s3://animeoracle/tfidf_similarity_df.csv")
+        tags = pd.read_csv("s3://animeoracle/tag_similarities_df.csv")
+        genre_list = pd.read_csv("genre_list.csv")
+        studio_list = pd.read_csv("studio_list.csv")
+        title_list = pd.read_csv("title_list.csv")
+        status_list = pd.read_csv("status_list.csv")
+        episodes_list = pd.read_csv("episodes_list.csv")
+        started_list = pd.read_csv("started_list.csv")
+        return anime_final, tfidf, tags, genre_list, studio_list, title_list, status_list,episodes_list, started_list
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        raise e
 
 anime_final, tfidf, tags, genre_list, studio_list, title_list, status_list, episodes_list, started_list = load_data()
 
