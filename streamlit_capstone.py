@@ -109,8 +109,6 @@ try:
     # Access data from session state
     anime_final = st.session_state.data['anime_final']
     genre_list = st.session_state.data['genre_list']
-    tfidf = st.session_state.data['tfidf']
-    tags = st.session_state.data['tags']
     studio_list = st.session_state.data['studio_list']
     title_list = st.session_state.data['title_list']
     status_list = st.session_state.data['status_list']
@@ -373,7 +371,9 @@ try:
     score_count = st.sidebar.slider("Number of Users Scoring:", min_value=0, max_value=50000, value=0, step=5000)
 
 
-    def anime_recommender(df, titles, status_columns, genre_columns, episode_columns, started_columns, studio_columns, min_rating=0, max_rating=10, tfidf_weight=1, tag_weight=1, score_count=1):
+    def anime_recommender(df, titles, status_columns, genre_columns, episode_columns, 
+                         started_columns, studio_columns, min_rating, max_rating, 
+                         tfidf_weight, tag_weight, score_count, tfidf_data, tags_data):
         # Step 1: Set up a new DataFrame with necessary columns
         columns_to_copy = ['anime_id', 'title', 'score', 'score_count', 'anime_url', 'main_pic']
         
@@ -392,8 +392,8 @@ try:
         for title in titles:
             tfidf_col_name = f'tfidf_{title}'
             tag_col_name = f'tag_{title}'
-            new_df[tfidf_col_name] = tfidf[title] * tfidf_weight
-            new_df[tag_col_name] = tags[title] * tag_weight
+            new_df[tfidf_col_name] = tfidf_data[title] * tfidf_weight
+            new_df[tag_col_name] = tags_data[title] * tag_weight
 
         # Step 3: Apply any filters selected for the different tags
 
@@ -483,7 +483,7 @@ try:
         else:
             # Load similarity data only when needed
             with st.spinner('Loading recommendation data...'):
-                tfidf, tags = load_recommendation_data(st.session_state.selected_anime)
+                tfidf_data, tags_data = load_recommendation_data(st.session_state.selected_anime)
                 
             recommendations = anime_recommender(
                 anime_final, 
@@ -498,8 +498,8 @@ try:
                 tfidf_weight=tfidf_weight,
                 tag_weight=tag_weight,
                 score_count=score_count,
-                tfidf_data=tfidf,
-                tags_data=tags
+                tfidf_data=tfidf_data,
+                tags_data=tags_data
             )
             # Randomly select 6 from the top 50 recommendations
             top_recommendations = recommendations.head(50)
