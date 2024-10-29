@@ -171,7 +171,7 @@ try:
         random_anime_titles = list(title_list['title'])  # Using the title column
         filtered_anime_final = anime_final.loc[anime_final['title'].isin(random_anime_titles)]
         st.session_state.random_anime = filtered_anime_final.sample(9, replace=False)
-        st.experimental_rerun()  # Force Streamlit to rerun the script
+        st.rerun()  # Force Streamlit to rerun the script
 
 
     # Select Your Favorite Anime
@@ -315,7 +315,7 @@ try:
             col1, col2 = st.columns([0.1, 1.5])
             if col1.button("x", key=f"remove_{idx}"):
                 st.session_state.selected_anime.remove(anime)
-                st.experimental_rerun()
+                st.rerun()
             col2.write(f"**{anime}**")
 
 
