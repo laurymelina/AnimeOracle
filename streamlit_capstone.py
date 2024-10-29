@@ -8,25 +8,20 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Increase the default timeout for data loading
-st.set_page_config(layout="wide")
-
 @st.cache_data(ttl=3600)
-def load_s3_data_chunked(bucket_name, file_name, usecols=None, chunksize=5000):
+def load_s3_data_chunked(bucket_name, file_name, usecols=None):
     """Load large S3 files in chunks"""
     try:
         s3 = boto3.client('s3')
         chunks = []
-
-        # Get the S3 object only once
-        s3_object = s3.get_object(Bucket=bucket_name, Key=file_name)["Body"].read().decode("utf-8")
         
-        # Process in smaller chunks
+        # Read in chunks with only necessary columns
         for chunk in pd.read_csv(
-            StringIO(s3_object),
-            chunksize=chunksize,
-            usecols=usecols,
-            dtype_backend='numpy_nullable'  # More memory efficient
+            StringIO(
+                s3.get_object(Bucket=bucket_name, Key=file_name)["Body"].read().decode("utf-8")
+            ),
+            chunksize=10000,  # Adjust chunk size based on memory
+            usecols=usecols
         ):
             # Optimize datatypes
             for col in chunk.select_dtypes(include=['float64']).columns:
@@ -34,19 +29,8 @@ def load_s3_data_chunked(bucket_name, file_name, usecols=None, chunksize=5000):
             for col in chunk.select_dtypes(include=['int64']).columns:
                 chunk[col] = chunk[col].astype('int32')
             chunks.append(chunk)
-
-            # Force garbage collection after each chunk
-            gc.collect()
-
-        # Concatenate all chunks
-        result = pd.concat(chunks, ignore_index=True)
         
-        # Clear the chunks list to free memory
-        chunks.clear()
-        del s3_object
-        gc.collect()
-        
-        return result
+        return pd.concat(chunks, ignore_index=True)
     except Exception as e:
         logger.error(f"Error loading {file_name} from S3: {e}")
         st.error(f"Failed to load {file_name}. Please try again later.")
