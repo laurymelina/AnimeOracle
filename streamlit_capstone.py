@@ -9,12 +9,28 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @st.cache_data(ttl=3600)
-def load_s3_data(bucket_name, file_name):
-    """Load a single file from S3"""
+def load_s3_data_chunked(bucket_name, file_name, usecols=None):
+    """Load large S3 files in chunks"""
     try:
         s3 = boto3.client('s3')
-        obj = s3.get_object(Bucket=bucket_name, Key=file_name)
-        return pd.read_csv(StringIO(obj['Body'].read().decode('utf-8')))
+        chunks = []
+        
+        # Read in chunks with only necessary columns
+        for chunk in pd.read_csv(
+            StringIO(
+                s3.get_object(Bucket=bucket_name, Key=file_name)["Body"].read().decode("utf-8")
+            ),
+            chunksize=10000,  # Adjust chunk size based on memory
+            usecols=usecols
+        ):
+            # Optimize datatypes
+            for col in chunk.select_dtypes(include=['float64']).columns:
+                chunk[col] = chunk[col].astype('float32')
+            for col in chunk.select_dtypes(include=['int64']).columns:
+                chunk[col] = chunk[col].astype('int32')
+            chunks.append(chunk)
+        
+        return pd.concat(chunks, ignore_index=True)
     except Exception as e:
         logger.error(f"Error loading {file_name} from S3: {e}")
         st.error(f"Failed to load {file_name}. Please try again later.")
@@ -22,25 +38,20 @@ def load_s3_data(bucket_name, file_name):
 
 @st.cache_data(ttl=3600)
 def load_local_data(file_name):
-    """Load a single local file"""
+    """Load local files"""
     try:
-        return pd.read_csv(file_name)
+        df = pd.read_csv(file_name)
+        return df
     except Exception as e:
         logger.error(f"Error loading {file_name}: {e}")
-        st.error(f"Failed to load {file_name}. Please check if the file exists.")
+        st.error(f"Failed to load {file_name}")
         raise e
 
-def load_data():
-    """Main data loading function"""
+def load_initial_data():
+    """Load only essential data for initial app startup"""
     try:
-        with st.spinner('Loading data... Please wait...'):
-            # S3 data
-            bucket_name = "animeoracle"
-            anime_final = load_s3_data(bucket_name, "final_df.csv")
-            tfidf = load_s3_data(bucket_name, "tfidf_similarity_df.csv")
-            tags = load_s3_data(bucket_name, "tag_similarities_df.csv")
-            
-            # Local data
+        with st.spinner('Loading initial data...'):
+            # Load small local files first
             genre_list = load_local_data("genre_list.csv")
             studio_list = load_local_data("studio_list.csv")
             title_list = load_local_data("title_list.csv")
@@ -48,23 +59,67 @@ def load_data():
             episodes_list = load_local_data("episodes_list.csv")
             started_list = load_local_data("started_list.csv")
             
-            return anime_final, tfidf, tags, genre_list, studio_list, title_list, status_list, episodes_list, started_list
+            # Load only essential columns from anime_final
+            essential_cols = ['anime_id', 'title', 'score', 'score_count', 'anime_url', 'main_pic']
+            bucket_name = "animeoracle"
+            anime_final = load_s3_data_chunked(bucket_name, "final_df.csv", usecols=essential_cols)
+            
+            return {
+                'genre_list': genre_list,
+                'studio_list': studio_list,
+                'title_list': title_list,
+                'status_list': status_list,
+                'episodes_list': episodes_list,
+                'started_list': started_list,
+                'anime_final': anime_final
+            }
     except Exception as e:
-        logger.error(f"Error in main load_data function: {e}")
-        st.error("Failed to load required data. Please try again later.")
+        logger.error(f"Error in load_initial_data: {e}")
+        st.error("Failed to load initial data. Please refresh the page.")
         raise e
+
+@st.cache_data(ttl=3600)
+def load_recommendation_data(selected_titles):
+    """Load similarity data only when needed for recommendations"""
+    try:
+        bucket_name = "animeoracle"
+        
+        # Load only the columns we need from similarity matrices
+        tfidf_cols = ['title'] + selected_titles
+        tags_cols = ['title'] + selected_titles
+        
+        tfidf = load_s3_data_chunked(bucket_name, "tfidf_similarity_df.csv", usecols=tfidf_cols)
+        tags = load_s3_data_chunked(bucket_name, "tag_similarities_df.csv", usecols=tags_cols)
+        
+        return tfidf, tags
+    except Exception as e:
+        logger.error(f"Error loading recommendation data: {e}")
+        st.error("Failed to load recommendation data. Please try again.")
+        raise e
+
+# Initialize session state
+if 'data' not in st.session_state:
+    st.session_state.data = None
 
 # Main app initialization
 try:
-    # Show loading message
-    st.markdown("<h3 style='text-align: center;'>📊 Loading Application...</h3>", unsafe_allow_html=True)
+    if st.session_state.data is None:
+        st.session_state.data = load_initial_data()
     
-    # Load data
-    anime_final, tfidf, tags, genre_list, studio_list, title_list, status_list, episodes_list, started_list = load_data()
+    # Access data from session state
+    anime_final = st.session_state.data['anime_final']
+    genre_list = st.session_state.data['genre_list']
+    tfidf = st.session_state.data['tfidf']
+    tags = st.session_state.data['tags']
+    studio_list = st.session_state.data['studio_list']
+    title_list = st.session_state.data['title_list']
+    status_list = st.session_state.data['status_list']
+    episodes_list = st.session_state.data['episodes_list']
+    started_list = st.session_state.data['started_list']
     
     # Rest of your app code...
     
-    
+
     # CSS for background image with transparency
     st.markdown(
         """
@@ -426,10 +481,26 @@ try:
         if not st.session_state.selected_anime:
             st.error("Please select at least one anime.")
         else:
-            recommendations = anime_recommender(anime_final, st.session_state.selected_anime, selected_status,
-                                                selected_genres, selected_episodes, selected_started,
-                                                selected_studio, min_rating, max_rating,
-                                                tfidf_weight=tfidf_weight, tag_weight=tag_weight, score_count=score_count)
+            # Load similarity data only when needed
+            with st.spinner('Loading recommendation data...'):
+                tfidf, tags = load_recommendation_data(st.session_state.selected_anime)
+                
+            recommendations = anime_recommender(
+                anime_final, 
+                st.session_state.selected_anime,
+                selected_status,
+                selected_genres,
+                selected_episodes,
+                selected_started,
+                selected_studio,
+                min_rating,
+                max_rating,
+                tfidf_weight=tfidf_weight,
+                tag_weight=tag_weight,
+                score_count=score_count,
+                tfidf_data=tfidf,
+                tags_data=tags
+            )
             # Randomly select 6 from the top 50 recommendations
             top_recommendations = recommendations.head(50)
             final_recommendations = top_recommendations.sample(6)
@@ -449,4 +520,4 @@ try:
 
 except Exception as e:
     logger.error(f"Application initialization error: {e}")
-    st.error("Failed to initialize the application. Please refresh the page or try again later.")
+    st.error("Failed to initialize the application. Please refresh the page.")
